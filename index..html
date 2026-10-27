@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analizador estadístico de procesos</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1d2733;--mut:#5d6b7a;--pri:#0b5ea8;--bd:#d8dee6;--bad:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1d242c;--tx:#e8edf2;--mut:#9aa8b6;--pri:#5aa9ec;--bd:#33404d;--bad:#ff8a80}}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--tx);line-height:1.45}
+header{background:var(--pri);color:#fff;padding:14px 20px}header h1{margin:0;font-size:1.25rem}header small{opacity:.85}
+main{max-width:1000px;margin:auto;padding:14px}
+section{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:1.05rem;color:var(--pri)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+label{font-size:.82rem;color:var(--mut);display:block}
+input,select,textarea{width:100%;padding:7px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{min-height:110px}
+button{background:var(--pri);color:#fff;border:0;border-radius:6px;padding:8px 14px;font:inherit;cursor:pointer;margin:8px 6px 0 0}
+button.sec{background:transparent;color:var(--pri);border:1px solid var(--pri)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{border:1px solid var(--bd);padding:5px 8px;text-align:center}th{background:var(--bg)}
+.wrap{overflow-x:auto}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.kpi{border:1px solid var(--bd);border-radius:8px;padding:8px;text-align:center}.kpi b{display:block;font-size:1.2rem}.kpi span{font-size:.78rem;color:var(--mut)}
+svg{width:100%;height:auto;background:var(--card)}svg text{fill:var(--tx);font-size:11px}
+#informe p{margin:6px 0}.warn{color:var(--bad);font-weight:600}
+#msg{color:var(--bad);font-size:.9rem}
+@media print{header button,.noprint{display:none}body{background:#fff;color:#000}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<header><h1>Analizador estadístico de procesos</h1><small>UNIPAZ · Ingeniería de Producción · Estadística (840601)</small></header>
+<main>
+
+<section class="noprint">
+<h2>1. Datos de la empresa y del proceso</h2>
+<div class="grid">
+<div><label>Empresa</label><input id="empresa" value="Servicios Petroleros Río Grande S.A.S."></div>
+<div><label>Variable</label><input id="variable" value="Duración del paro por falla de bomba"></div>
+<div><label>Unidad</label><input id="unidad" value="min"></div>
+<div><label>¿Qué es mejor?</label><select id="mejor"><option>Menor valor</option><option>Mayor valor</option></select></div>
+<div><label>Límite de especificación</label><input id="limite" type="number" step="any" value="90"></div>
+<div><label>Meta de la empresa</label><input id="meta" type="number" step="any" value="60"></div>
+</div>
+<label style="margin-top:10px">Datos (uno por línea, en el orden en que se tomaron; acepta pegar o cargar CSV)</label>
+<textarea id="datos">26
+20
+27
+24
+26
+26
+20
+22
+27
+29
+31
+24
+34
+21
+23
+15
+29
+33
+32
+17
+30
+24
+17
+18
+21
+23
+17
+19
+29
+26
+26
+30
+34
+22
+22
+30
+38
+30
+32
+29</textarea>
+<input type="file" id="archivo" accept=".csv,.txt" style="display:none">
+<button onclick="document.getElementById('archivo').click()">Cargar archivo…</button>
+<button onclick="analizar()">Analizar</button>
+<button class="sec" onclick="window.print()">Guardar informe como PDF</button>
+<div id="msg"></div>
+</section>
+
+<section><h2>2. Medidas descriptivas</h2><div class="kpis" id="kpis"></div></section>
+<section><h2>3. Tabla de distribución de frecuencias</h2><div class="wrap" id="tabla"></div><p id="clases" style="font-size:.85rem;color:var(--mut)"></p></section>
+<section><h2>4. Histograma</h2><div id="histo"></div></section>
+<section><h2>5. Ojiva (frecuencia acumulada)</h2><div id="ojiva"></div></section>
+<section id="informe"><h2>6. Informe automático</h2><div id="textoInforme"></div></section>
+
+<section>
+<h2>7. Aporte del grupo</h2>
+<p style="font-size:.85rem;color:var(--mut)">Escriban dos alternativas de mejora: qué proponen, qué dato de la app lo respalda y cómo sabrán si funcionó. Mencionen que usaron IA y qué pidieron.</p>
+<textarea id="aporte" style="min-height:160px" placeholder="Alternativa 1: ...&#10;Alternativa 2: ..."></textarea>
+</section>
+</main>
+
+<script>
+/* ===== Funciones de cálculo ===== */
+function fmt(x,d){return Number(x).toLocaleString("es-CO",{minimumFractionDigits:d,maximumFractionDigits:d})}
+function leerDatos(txt){
+  var out=[];
+  txt.split(/\r?\n/).forEach(function(l){
+    var campos=/[;\t]/.test(l)?l.split(/[;\t]/):l.split(",");
+    for(var i=campos.length-1;i>=0;i--){
+      var c=campos[i].trim().replace(",",".");
+      if(c!==""&&!isNaN(c)){out.push(parseFloat(c));break}
+    }
+  });
+  return out;
+}
+function media(a){return a.reduce(function(s,x){return s+x},0)/a.length}
+function mediana(a){var s=a.slice().sort(function(x,y){return x-y}),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2}
+function moda(a){
+  var c={},mx=0;a.forEach(function(x){c[x]=(c[x]||0)+1;if(c[x]>mx)mx=c[x]});
+  var r=Object.keys(c).filter(function(k){return c[k]===mx}).map(Number).sort(function(x,y){return x-y});
+  return {valores:r,frec:mx};
+}
+function desvTipica(a){var m=media(a);return Math.sqrt(a.reduce(function(s,x){return s+(x-m)*(x-m)},0)/(a.length-1))}
+function agrupar(a){
+  var n=a.length,mn=Math.min.apply(null,a),mx=Math.max.apply(null,a),R=mx-mn;
+  var k=Math.round(1+3.322*Math.log10(n));
+  var A=Math.ceil(R/k); if(A<=0)A=1;
+  var cl=[];
+  for(var i=0;i<k;i++)cl.push({li:mn+i*A,ls:mn+(i+1)*A,marca:mn+i*A+A/2,fi:0});
+  a.forEach(function(x){var j=Math.min(k-1,Math.floor((x-mn)/A));cl[j].fi++});
+  var F=0;cl.forEach(function(c){F+=c.fi;c.Fi=F;c.fr=c.fi/n;c.Fr=F/n});
+  var mg=cl.reduce(function(s,c){return s+c.fi*c.marca},0)/n;
+  var j=0;while(cl[j].Fi<n/2)j++;
+  var prev=j?cl[j-1].Fi:0;
+  var medg=cl[j].li+A*(n/2-prev)/cl[j].fi;
+  var jm=0;cl.forEach(function(c,i){if(c.fi>cl[jm].fi)jm=i});
+  var d1=cl[jm].fi-(jm?cl[jm-1].fi:0),d2=cl[jm].fi-(jm<k-1?cl[jm+1].fi:0);
+  var modg=cl[jm].li+A*(d1/(d1+d2));
+  return {n:n,mn:mn,mx:mx,R:R,k:k,A:A,cl:cl,mg:mg,medg:medg,modg:modg};
+}
+
+/* ===== Gráficos (SVG sin librerías) ===== */
+function svgHisto(g){
+  var W=640,H=280,L=45,B=40,T=15,mx=Math.max.apply(null,g.cl.map(function(c){return c.fi}));
+  var bw=(W-L-10)/g.k,s='<svg viewBox="0 0 '+W+' '+H+'">';
+  for(var t=0;t<=mx;t++){var y=H-B-(H-B-T)*t/mx;s+='<line x1="'+L+'" x2="'+(W-10)+'" y1="'+y+'" y2="'+y+'" stroke="#8884" /><text x="'+(L-6)+'" y="'+(y+4)+'" text-anchor="end">'+t+'</text>'}
+  g.cl.forEach(function(c,i){
+    var h=(H-B-T)*c.fi/mx,x=L+i*bw;
+    s+='<rect x="'+x+'" y="'+(H-B-h)+'" width="'+bw+'" height="'+h+'" fill="#0b5ea8" stroke="#fff"/>';
+    s+='<text x="'+(x+bw/2)+'" y="'+(H-B-h-4)+'" text-anchor="middle">'+c.fi+'</text>';
+    s+='<text x="'+x+'" y="'+(H-B+14)+'" text-anchor="middle">'+c.li+'</text>';
+  });
+  s+='<text x="'+(L+g.k*bw)+'" y="'+(H-B+14)+'" text-anchor="middle">'+g.cl[g.k-1].ls+'</text>';
+  s+='<text x="'+(W/2)+'" y="'+(H-6)+'" text-anchor="middle">'+document.getElementById("variable").value+' ('+document.getElementById("unidad").value+')</text>';
+  return s+'</svg>';
+}
+function svgOjiva(g){
+  var W=640,H=280,L=45,B=40,T=15,x0=g.cl[0].li,x1=g.cl[g.k-1].ls;
+  function X(v){return L+(W-L-15)*(v-x0)/(x1-x0)}function Y(p){return H-B-(H-B-T)*p}
+  var s='<svg viewBox="0 0 '+W+' '+H+'">';
+  [0,.25,.5,.75,1].forEach(function(p){s+='<line x1="'+L+'" x2="'+(W-15)+'" y1="'+Y(p)+'" y2="'+Y(p)+'" stroke="#8884"/><text x="'+(L-6)+'" y="'+(Y(p)+4)+'" text-anchor="end">'+Math.round(p*100)+'%</text>'});
+  var pts=[[x0,0]];g.cl.forEach(function(c){pts.push([c.ls,c.Fr])});
+  s+='<polyline fill="none" stroke="#e07a00" stroke-width="2.5" points="'+pts.map(function(p){return X(p[0])+','+Y(p[1])}).join(' ')+'"/>';
+  pts.forEach(function(p){s+='<circle cx="'+X(p[0])+'" cy="'+Y(p[1])+'" r="3.5" fill="#e07a00"/><text x="'+X(p[0])+'" y="'+(H-B+14)+'" text-anchor="middle">'+p[0]+'</text>'});
+  return s+'</svg>';
+}
+
+/* ===== Informe ===== */
+function construirInforme(a,g,m){
+  var u=document.getElementById("unidad").value,emp=document.getElementById("empresa").value,v=document.getElementById("variable").value;
+  var lim=parseFloat(document.getElementById("limite").value),meta=parseFloat(document.getElementById("meta").value);
+  var menor=document.getElementById("mejor").value==="Menor valor";
+  var p=[];
+  p.push("<p>Se analizaron <b>"+g.n+"</b> registros de <b>"+v+"</b> en <b>"+emp+"</b>. La media es "+fmt(m.media,3)+" "+u+", la mediana "+fmt(m.mediana,3)+" "+u+" y la desviación típica "+fmt(m.sd,3)+" "+u+" (CV = "+fmt(m.cv,2)+" %).</p>");
+  p.push("<p>"+(m.cv>20?"El coeficiente de variación es <b>alto</b> (mayor a 20 %): el proceso es poco estable.":m.cv>10?"El coeficiente de variación es <b>moderado</b>.":"El coeficiente de variación es <b>bajo</b>: el proceso es bastante homogéneo.")+"</p>");
+  if(!isNaN(lim)){
+    var fuera=a.filter(function(x){return menor?x>lim:x<lim}).length;
+    p.push("<p>"+fuera+" de "+g.n+" registros ("+fmt(fuera/g.n*100,1)+" %) "+(menor?"superan":"quedan por debajo de")+" el límite de especificación de "+lim+" "+u+".</p>");
+  }
+  if(!isNaN(meta)){
+    var nm=a.filter(function(x){return menor?x<=meta:x>=meta}).length;
+    p.push("<p>"+nm+" de "+g.n+" registros ("+fmt(nm/g.n*100,1)+" %) cumplen la meta de "+meta+" "+u+".</p>");
+  }
+  return p.join("");
+}
+
+/* ===== Principal ===== */
+function analizar(){
+  var msg=document.getElementById("msg");msg.textContent="";
+  var a=leerDatos(document.getElementById("datos").value);
+  if(a.length<5){msg.textContent="Necesito al menos 5 datos numéricos.";return}
+  var g=agrupar(a),mo=moda(a);
+  var m={media:media(a),mediana:mediana(a),sd:desvTipica(a)};m.cv=m.sd/m.media*100;
+  var u=document.getElementById("unidad").value;
+  var k=[["n",g.n],["Media",fmt(m.media,3)+" "+u],["Mediana",fmt(m.mediana,3)+" "+u],["Moda",mo.valores.slice(0,3).join(", ")+" "+u+(mo.frec<2?" (sin moda clara)":"")],
+    ["Desv. típica",fmt(m.sd,3)+" "+u],["CV",fmt(m.cv,2)+" %"],["Mínimo",g.mn],["Máximo",g.mx],
+    ["Media agrupada",fmt(g.mg,1)+" "+u],["Mediana agrupada",fmt(g.medg,1)+" "+u],["Moda agrupada",fmt(g.modg,1)+" "+u]];
+  document.getElementById("kpis").innerHTML=k.map(function(x){return '<div class="kpi"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>'}).join("");
+  var t='<table><tr><th>Clase</th><th>Marca xi</th><th>fi</th><th>fr</th><th>Fi</th><th>Fr %</th></tr>';
+  g.cl.forEach(function(c){t+='<tr><td>'+c.li+' – '+c.ls+'</td><td>'+c.marca+'</td><td>'+c.fi+'</td><td>'+fmt(c.fr,3)+'</td><td>'+c.Fi+'</td><td>'+fmt(c.Fr*100,1)+'</td></tr>'});
+  document.getElementById("tabla").innerHTML=t+'</table>';
+  document.getElementById("clases").textContent="Regla de Sturges: k = "+g.k+" clases, rango = "+g.R+", amplitud A = "+g.A+". Clases cerradas a la izquierda [Li, Ls); la última incluye su límite superior.";
+  document.getElementById("histo").innerHTML=svgHisto(g);
+  document.getElementById("ojiva").innerHTML=svgOjiva(g);
+  document.getElementById("textoInforme").innerHTML=construirInforme(a,g,m);
+}
+document.getElementById("archivo").addEventListener("change",function(e){
+  var f=e.target.files[0];if(!f)return;
+  var r=new FileReader();r.onload=function(){document.getElementById("datos").value=r.result;analizar()};r.readAsText(f);
+});
+analizar();
+</script>
+</body>
+</html>
